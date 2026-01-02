@@ -3,208 +3,55 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>みんなで豆腐守り</title>
-    <style>
-        body {
-            margin: 0;
-            font-family: 'Comic Sans MS', sans-serif;
-            background-color: #ffebcd;
-            text-align: center;
-            overflow: hidden;
-            touch-action: none;
-            user-select: none;
-            -webkit-user-select: none;
-        }
-        #lobby-screen, #game-screen, #result-screen { 
-            display: none; /* 一旦全部消す */
-            height: 100vh;
-            flex-direction: column;
-            justify-content: center;
-            align-items: center;
-        }
-        /* 初期状態はロビーを表示 */
-        #lobby-screen { display: flex; }
-
-        .btn {
-            background: #ff4500;
-            color: white;
-            border: none;
-            padding: 15px 30px;
-            font-size: 20px;
-            border-radius: 10px;
-            margin: 10px;
-            cursor: pointer;
-            box-shadow: 0 5px #b22222;
-        }
-        .btn:active { box-shadow: 0 2px #b22222; transform: translateY(3px); }
-
-        /* 画像サイズ調整 */
-        img {
-            max-width: 80%;
-            height: auto;
-            pointer-events: none; /* 画像のドラッグ禁止 */
-        }
-        
-        .flash { animation: flashing 0.2s infinite; }
-        @keyframes flashing {
-            0% { background-color: red; }
-            50% { background-color: yellow; }
-            100% { background-color: black; }
-        }
-    </style>
+    <title>THE TOFU - 豆腐守り</title>
+    <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
-    <div id="lobby-screen">
-        <h1>🛡️ みんなで豆腐守り</h1>
-        <p>音量をMAXにしてください。<br>※マナーモード解除必須</p>
+    <div id="lobby-screen" class="screen">
+        <h1 class="title">🛡️ THE TOFU</h1>
+        <p class="warning">⚠️ 音量MAX推奨 / マナーモード解除 ⚠️</p>
         
         <div id="setup-ui">
-            <input type="text" id="room-code-input" placeholder="部屋コードを入力" style="padding:10px; font-size:18px;">
-            <br>
-            <button class="btn" onclick="createRoom()">部屋を作る</button>
-            <button class="btn" onclick="joinRoom()">部屋に入る</button>
+            <input type="text" id="room-code-input" placeholder="ROOM CODE" maxlength="6">
+            <div class="btn-group">
+                <button class="btn primary" id="create-btn">部屋を作る</button>
+                <button class="btn secondary" id="join-btn">部屋に入る</button>
+            </div>
         </div>
 
-        <div id="waiting-ui" style="display:none;">
-            <h2 id="room-display"></h2>
-            <p>待機中...</p>
-            <button class="btn" onclick="startGame()" style="background:gold; color:black;">👉 全員揃ったら開始！</button>
+        <div id="waiting-ui" class="hidden">
+            <h2 id="room-display">CODE: ??????</h2>
+            <div class="member-list">
+                <p>現在の参加者: <span id="member-count">1</span>人</p>
+                <ul id="member-names"></ul>
+            </div>
+            <p class="instruction">全員揃ったら下のボタンを押せ</p>
+            <button class="btn gold" id="to-ready-btn">👉 全員、豆腐の準備へ！</button>
         </div>
     </div>
 
-    <div id="game-screen">
-        <h2 style="color:red; margin-top:50px;">絶対に指を離すな...</h2>
-        <img id="tofu-img" src="tofu.png" width="250">
+    <div id="game-screen" class="screen hidden">
+        <div id="status-message">指を置け...</div>
+        
+        <div id="game-area">
+            <img id="tofu-img" src="tofu.png" alt="Tofu">
+        </div>
+
+        <div id="ready-status">
+            準備完了: <span id="ready-count">0</span> / <span id="total-count">0</span>
+        </div>
     </div>
 
-    <div id="result-screen">
-        <h1 style="font-size: 40px; color:red;">☠️ GAME OVER ☠️</h1>
-        <img src="dead.png" width="300">
-        <h2 id="traitor-name">戦犯：???</h2>
-        <button class="btn" onclick="location.reload()">もう一度やる</button>
+    <div id="result-screen" class="screen hidden">
+        <h1 class="game-over">GAME OVER</h1>
+        <div id="criminal-area">
+            <img src="dead.png" alt="Dead" class="dead-img">
+            <h2 id="traitor-name">戦犯: ???</h2>
+        </div>
+        <button class="btn retry" onclick="location.reload()">もう一度やる</button>
     </div>
 
-    <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-        import { getFirestore, doc, setDoc, updateDoc, onSnapshot, arrayUnion } 
-        from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
-
-        // ★★★ ↓ここにお前のConfigを貼り直せ！↓ ★★★
-          // ★ここにFirebaseコンソールの設定をコピペせよ★
-    const firebaseConfig = {
-  apiKey: "AIzaSyDY8AWBkOS5H8ynYkODpogLl7SYoRF2JvY",
-  authDomain: "tofu1-66cb7.firebaseapp.com",
-  projectId: "tofu1-66cb7",
-  storageBucket: "tofu1-66cb7.firebasestorage.app",
-  messagingSenderId: "96663536524",
-  appId: "1:96663536524:web:0de179a9ed218268598ca9",
-  measurementId: "G-68E9Q4Y7FR"
-};
-        const app = initializeApp(firebaseConfig);
-        const db = getFirestore(app);
-        
-        let roomCode = "";
-        let myName = "User-" + Math.floor(Math.random() * 1000);
-        let isTouching = false;
-        
-        // 簡易的な音（ブラウザによっては鳴らない場合があるが、まずはこれで）
-        // 外部のフリー音源URLを使っている。必要ならmp3もGitHubに上げてパスを変えろ。
-        const screamAudio = new Audio('https://www.soundjay.com/human/sounds/scream-01.mp3'); 
-
-        window.createRoom = async () => {
-            roomCode = Math.floor(100000 + Math.random() * 900000).toString();
-            await setDoc(doc(db, "rooms", roomCode), {
-                status: "waiting",
-                members: [myName],
-                traitor: ""
-            });
-            enterWaitingMode();
-        };
-
-        window.joinRoom = async () => {
-            roomCode = document.getElementById("room-code-input").value;
-            if(!roomCode) return alert("コードを入れてね");
-            await updateDoc(doc(db, "rooms", roomCode), {
-                members: arrayUnion(myName)
-            });
-            enterWaitingMode();
-        };
-
-        function enterWaitingMode() {
-            document.getElementById("setup-ui").style.display = "none";
-            document.getElementById("waiting-ui").style.display = "block";
-            document.getElementById("room-display").innerText = "部屋コード: " + roomCode;
-            startListening();
-        }
-
-        function startListening() {
-            onSnapshot(doc(db, "rooms", roomCode), (doc) => {
-                const data = doc.data();
-                if(!data) return;
-
-                // ゲーム開始シグナル受信
-                if(data.status === "playing") {
-                    document.getElementById("lobby-screen").style.display = "none";
-                    document.getElementById("game-screen").style.display = "flex";
-                    // 音楽再生の儀式（ユーザー操作が必要なためダミー再生）
-                    screamAudio.play().catch(e => console.log("Audio warning")); 
-                    screamAudio.pause();
-                    screamAudio.currentTime = 0;
-                }
-
-                // 死亡シグナル受信
-                if(data.status === "dead") {
-                    document.body.classList.add("flash");
-                    screamAudio.play();
-                    document.getElementById("game-screen").style.display = "none";
-                    document.getElementById("result-screen").style.display = "flex";
-                    document.getElementById("traitor-name").innerText = "戦犯：" + data.traitor;
-                }
-            });
-        }
-
-        window.startGame = async () => {
-            await updateDoc(doc(db, "rooms", roomCode), { status: "playing" });
-        };
-
-        // --- タッチ＆クリック処理 ---
-        const tofuImg = document.getElementById("tofu-img");
-        
-        // PC用
-        tofuImg.addEventListener("mousedown", () => {
-            tofuImg.style.transform = "scale(0.9)";
-            isTouching = true;
-        });
-        document.addEventListener("mouseup", async () => {
-            if(isTouching) {
-                isTouching = false;
-                await triggerDeath();
-            }
-        });
-
-        // スマホ用
-        tofuImg.addEventListener("touchstart", (e) => {
-            e.preventDefault(); // スクロール防止
-            tofuImg.style.transform = "scale(0.9)";
-            isTouching = true;
-        }, {passive: false});
-
-        tofuImg.addEventListener("touchend", async (e) => {
-            e.preventDefault();
-            if(isTouching) {
-                isTouching = false;
-                await triggerDeath();
-            }
-        });
-
-        async function triggerDeath() {
-            // すでに誰かが死んでたら送らない
-            await updateDoc(doc(db, "rooms", roomCode), { 
-                status: "dead",
-                traitor: myName
-            });
-        }
-    </script>
+    <script type="module" src="game.js"></script>
 </body>
 </html>
