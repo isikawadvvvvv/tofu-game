@@ -13,7 +13,10 @@
         <p class="warning">⚠️ 音量MAX推奨 / マナーモード解除 ⚠️</p>
         
         <div id="setup-ui">
-            <input type="text" id="room-code-input" placeholder="ROOM CODE" maxlength="6">
+            <input type="text" id="username-input" placeholder="名前を入力 (必須)" maxlength="8">
+            
+            <input type="text" id="room-code-input" placeholder="部屋コード (参加時)" maxlength="6">
+            
             <div class="btn-group">
                 <button class="btn primary" id="create-btn">部屋を作る</button>
                 <button class="btn secondary" id="join-btn">部屋に入る</button>
@@ -21,11 +24,18 @@
         </div>
 
         <div id="waiting-ui" class="hidden">
-            <h2 id="room-display">CODE: ??????</h2>
+            <div id="code-container" onclick="copyRoomCode()">
+                <span class="code-label">ROOM CODE</span>
+                <h2 id="room-display">------</h2>
+                <span class="copy-hint">📋 タップしてコピー</span>
+                <span id="copy-tooltip">コピー完了!</span>
+            </div>
+
             <div class="member-list">
                 <p>現在の参加者: <span id="member-count">1</span>人</p>
-                <ul id="member-names"></ul>
+                <ul id="member-names-list"></ul>
             </div>
+            
             <p class="instruction">全員揃ったら下のボタンを押せ</p>
             <button class="btn gold" id="to-ready-btn">👉 全員、豆腐の準備へ！</button>
         </div>
