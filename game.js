@@ -18,8 +18,8 @@ const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
 // 効果音（もし音が気に入らなければ、好きなmp3のURLに変えるか、GitHubにmp3を上げてファイル名を書け）
-const screamAudio = new Audio('https://www.soundjay.com/human/sounds/scream-01.mp3'); 
-const startAudio = new Audio('https://www.soundjay.com/buttons/sounds/button-3.mp3'); 
+const screamAudio = new Audio('Explosion.mp3'); 
+const startAudio = new Audio('Explosion.mp3'); 
 
 // ★音のロック解除用関数（ここが修正ポイント）★
 function unlockAudio() {
