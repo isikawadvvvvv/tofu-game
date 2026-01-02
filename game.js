@@ -2,8 +2,8 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebas
 import { getFirestore, doc, setDoc, updateDoc, onSnapshot, arrayUnion, arrayRemove, runTransaction } 
 from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
-// ★★★★★ ここにお前のConfigを貼れ！ ★★★★★
-    const firebaseConfig = {
+// ★ お前のConfig（埋め込み済み） ★
+const firebaseConfig = {
   apiKey: "AIzaSyDY8AWBkOS5H8ynYkODpogLl7SYoRF2JvY",
   authDomain: "tofu1-66cb7.firebaseapp.com",
   projectId: "tofu1-66cb7",
@@ -13,20 +13,33 @@ from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
   measurementId: "G-68E9Q4Y7FR"
 };
 
-
 // --- 初期化 ---
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
-// 効果音
+// 効果音（もし音が気に入らなければ、好きなmp3のURLに変えるか、GitHubにmp3を上げてファイル名を書け）
 const screamAudio = new Audio('https://www.soundjay.com/human/sounds/scream-01.mp3'); 
 const startAudio = new Audio('https://www.soundjay.com/buttons/sounds/button-3.mp3'); 
+
+// ★音のロック解除用関数（ここが修正ポイント）★
+function unlockAudio() {
+    // 一瞬だけ再生してすぐに止めることで、ブラウザに「音出していいよ」と許可させる
+    screamAudio.play().then(() => {
+        screamAudio.pause();
+        screamAudio.currentTime = 0;
+    }).catch(e => console.log("Audio unlock failed", e));
+
+    startAudio.play().then(() => {
+        startAudio.pause();
+        startAudio.currentTime = 0;
+    }).catch(e => console.log("Start audio unlock failed", e));
+}
 
 // 状態変数
 let roomCode = "";
 // ユニークIDと名前を組み合わせる "名前|ID" の形式にする
 let myUniqueId = Date.now().toString(36) + Math.random().toString(36).substr(2);
-let myFullName = ""; // ここに "Taro|id123" が入る
+let myFullName = ""; 
 let isTouching = false;
 let currentStatus = "lobby"; 
 
@@ -35,7 +48,7 @@ const ui = {
     lobby: document.getElementById("lobby-screen"),
     game: document.getElementById("game-screen"),
     result: document.getElementById("result-screen"),
-    nameInput: document.getElementById("username-input"), // 名前入力
+    nameInput: document.getElementById("username-input"),
     codeInput: document.getElementById("room-code-input"),
     msg: document.getElementById("status-message"),
     tofu: document.getElementById("tofu-img"),
@@ -43,9 +56,19 @@ const ui = {
 };
 
 // --- イベントリスナー ---
-document.getElementById("create-btn").onclick = createRoom;
-document.getElementById("join-btn").onclick = joinRoom;
-document.getElementById("to-ready-btn").onclick = goToReady;
+// ボタンを押した瞬間に「音のロック解除」を実行する
+document.getElementById("create-btn").onclick = async () => {
+    unlockAudio(); // ★ここでロック解除
+    await createRoom();
+};
+document.getElementById("join-btn").onclick = async () => {
+    unlockAudio(); // ★ここでロック解除
+    await joinRoom();
+};
+document.getElementById("to-ready-btn").onclick = async () => {
+    unlockAudio(); // ★念の為ここでも
+    await goToReady();
+};
 
 // --- クリップボードコピー機能 ---
 window.copyRoomCode = () => {
@@ -66,7 +89,7 @@ function getName(fullName) {
 async function createRoom() {
     const name = ui.nameInput.value.trim();
     if (!name) return alert("名前を入力してくれ！");
-    myFullName = `${name}|${myUniqueId}`; // 名前とIDを結合
+    myFullName = `${name}|${myUniqueId}`; 
 
     roomCode = Math.floor(100000 + Math.random() * 900000).toString();
     
@@ -130,6 +153,7 @@ function startListening() {
             ui.msg.style.color = "black";
             isTouching = false; 
             ui.area.classList.remove("touching");
+            unlockAudio(); // 念押しでここでも許可を求める
         }
 
         // 画面遷移：ゲーム開始
@@ -137,7 +161,7 @@ function startListening() {
             currentStatus = "playing";
             ui.msg.innerText = "🔥🔥 離したら死ぬ 🔥🔥";
             ui.msg.style.color = "red";
-            startAudio.play();
+            startAudio.play().catch(e => console.log("Start sound error", e));
             if (navigator.vibrate) navigator.vibrate(200);
         }
 
@@ -145,23 +169,25 @@ function startListening() {
         if (data.status === "dead" && currentStatus !== "dead") {
             currentStatus = "dead";
             document.body.classList.add("flash");
-            screamAudio.play();
+            
+            // ★ここで叫ぶ
+            screamAudio.play().catch(e => {
+                console.log("Scream error", e);
+                alert("ギャアアアア！（※iPhoneのマナーモードを解除しないと音が出ないぞ！）");
+            });
             
             ui.game.classList.add("hidden");
             ui.result.classList.remove("hidden");
-            
-            // 戦犯の名前を表示
             document.getElementById("traitor-name").innerText = "戦犯：" + getName(data.traitor);
             
             if (navigator.vibrate) navigator.vibrate([100,50,100,50,500]);
         }
         
-        // ホストによる自動スタート処理 (リストの先頭の人がホスト)
+        // ホストによる自動スタート処理
         if (currentStatus === "ready_check" && 
             data.readyPlayers.length === data.members.length && 
             data.members.length > 0 &&
             data.members[0] === myFullName) {
-                
             startGameTrigger();
         }
     });
@@ -189,7 +215,7 @@ async function triggerDeath() {
             if (sfDoc.data().status === "playing") {
                 transaction.update(roomRef, { 
                     status: "dead", 
-                    traitor: myFullName // ここで自分の名前(識別子)を送る
+                    traitor: myFullName 
                 });
             }
         });
@@ -207,6 +233,9 @@ startEvents.forEach(evt => {
         e.preventDefault();
         if (isTouching) return;
         
+        // ★タッチした瞬間にも念の為ロック解除（iOS対策）
+        if(currentStatus !== "playing") unlockAudio(); 
+
         isTouching = true;
         ui.area.classList.add("touching");
 
