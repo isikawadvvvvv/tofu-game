@@ -5,17 +5,26 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>みんなで豆腐守り</title>
     <style>
-        /* カオスなデザイン */
         body {
             margin: 0;
             font-family: 'Comic Sans MS', sans-serif;
-            background-color: #ffebcd; /* 豆腐色 */
+            background-color: #ffebcd;
             text-align: center;
             overflow: hidden;
-            touch-action: none; /* スマホでの操作無効化 */
+            touch-action: none;
+            user-select: none;
+            -webkit-user-select: none;
         }
-        #game-screen, #result-screen { display: none; }
-        
+        #lobby-screen, #game-screen, #result-screen { 
+            display: none; /* 一旦全部消す */
+            height: 100vh;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+        }
+        /* 初期状態はロビーを表示 */
+        #lobby-screen { display: flex; }
+
         .btn {
             background: #ff4500;
             color: white;
@@ -29,16 +38,14 @@
         }
         .btn:active { box-shadow: 0 2px #b22222; transform: translateY(3px); }
 
-        #tofu {
-            width: 200px;
-            height: 200px;
-            margin-top: 50px;
-            transition: transform 0.1s;
+        /* 画像サイズ調整 */
+        img {
+            max-width: 80%;
+            height: auto;
+            pointer-events: none; /* 画像のドラッグ禁止 */
         }
-        /* 恐怖の点滅アニメーション */
-        .flash {
-            animation: flashing 0.2s infinite;
-        }
+        
+        .flash { animation: flashing 0.2s infinite; }
         @keyframes flashing {
             0% { background-color: red; }
             50% { background-color: yellow; }
@@ -50,25 +57,31 @@
 
     <div id="lobby-screen">
         <h1>🛡️ みんなで豆腐守り</h1>
-        <p>音量をMAXにしてください。<br>社会的に死にます。</p>
-        <div id="room-info"></div>
-        <input type="text" id="room-code-input" placeholder="部屋コード6桁" style="padding:10px; font-size:18px;">
-        <br>
-        <button class="btn" onclick="createRoom()">部屋を作る</button>
-        <button class="btn" onclick="joinRoom()">部屋に入る</button>
-        <br><br>
-        <button class="btn" id="start-btn" style="display:none; background:gold; color:black;" onclick="startGame()">全員揃った！開始！</button>
+        <p>音量をMAXにしてください。<br>※マナーモード解除必須</p>
+        
+        <div id="setup-ui">
+            <input type="text" id="room-code-input" placeholder="部屋コードを入力" style="padding:10px; font-size:18px;">
+            <br>
+            <button class="btn" onclick="createRoom()">部屋を作る</button>
+            <button class="btn" onclick="joinRoom()">部屋に入る</button>
+        </div>
+
+        <div id="waiting-ui" style="display:none;">
+            <h2 id="room-display"></h2>
+            <p>待機中...</p>
+            <button class="btn" onclick="startGame()" style="background:gold; color:black;">👉 全員揃ったら開始！</button>
+        </div>
     </div>
 
     <div id="game-screen">
-        <h2 style="color:red;">絶対に指を離すな...</h2>
-        <img id="tofu" src="https://1.bp.blogspot.com/-m5W7M4kH4vI/U0U7u6s-VLI/AAAAAAAAe_Y/u2LhN9Y9C9I/s800/food_tofu.png">
+        <h2 style="color:red; margin-top:50px;">絶対に指を離すな...</h2>
+        <img id="tofu-img" src="tofu.png" width="250">
     </div>
 
     <div id="result-screen">
-        <h1 style="font-size: 50px;">☠️ GAME OVER ☠️</h1>
+        <h1 style="font-size: 40px; color:red;">☠️ GAME OVER ☠️</h1>
+        <img src="dead.png" width="300">
         <h2 id="traitor-name">戦犯：???</h2>
-        <p>が裏切りました</p>
         <button class="btn" onclick="location.reload()">もう一度やる</button>
     </div>
 
@@ -77,7 +90,8 @@
         import { getFirestore, doc, setDoc, updateDoc, onSnapshot, arrayUnion } 
         from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
-        // ★ここにFirebaseコンソールの設定をコピペせよ★
+        // ★★★ ↓ここにお前のConfigを貼り直せ！↓ ★★★
+          // ★ここにFirebaseコンソールの設定をコピペせよ★
     const firebaseConfig = {
   apiKey: "AIzaSyDY8AWBkOS5H8ynYkODpogLl7SYoRF2JvY",
   authDomain: "tofu1-66cb7.firebaseapp.com",
@@ -87,18 +101,17 @@
   appId: "1:96663536524:web:0de179a9ed218268598ca9",
   measurementId: "G-68E9Q4Y7FR"
 };
-
         const app = initializeApp(firebaseConfig);
         const db = getFirestore(app);
         
         let roomCode = "";
-        let myName = "User" + Math.floor(Math.random() * 1000);
+        let myName = "User-" + Math.floor(Math.random() * 1000);
         let isTouching = false;
         
-        // 効果音（フリー素材のURLなどを入れる）
+        // 簡易的な音（ブラウザによっては鳴らない場合があるが、まずはこれで）
+        // 外部のフリー音源URLを使っている。必要ならmp3もGitHubに上げてパスを変えろ。
         const screamAudio = new Audio('https://www.soundjay.com/human/sounds/scream-01.mp3'); 
 
-        // 部屋を作る
         window.createRoom = async () => {
             roomCode = Math.floor(100000 + Math.random() * 900000).toString();
             await setDoc(doc(db, "rooms", roomCode), {
@@ -106,91 +119,92 @@
                 members: [myName],
                 traitor: ""
             });
-            startListening();
+            enterWaitingMode();
         };
 
-        // 部屋に入る
         window.joinRoom = async () => {
             roomCode = document.getElementById("room-code-input").value;
             if(!roomCode) return alert("コードを入れてね");
             await updateDoc(doc(db, "rooms", roomCode), {
                 members: arrayUnion(myName)
             });
-            startListening();
+            enterWaitingMode();
         };
 
-        // 監視開始
+        function enterWaitingMode() {
+            document.getElementById("setup-ui").style.display = "none";
+            document.getElementById("waiting-ui").style.display = "block";
+            document.getElementById("room-display").innerText = "部屋コード: " + roomCode;
+            startListening();
+        }
+
         function startListening() {
-            document.getElementById("lobby-screen").innerHTML = `<h2>部屋コード: ${roomCode}</h2><p>待機中...</p>`;
-            
             onSnapshot(doc(db, "rooms", roomCode), (doc) => {
                 const data = doc.data();
                 if(!data) return;
 
-                // メンバー更新
-                if(data.status === "waiting") {
-                     // 自分がホストなら開始ボタン出すとかの処理（省略）
-                     if(document.getElementById("start-btn")) document.getElementById("start-btn").style.display = "block";
-                }
-
-                // ゲーム開始
+                // ゲーム開始シグナル受信
                 if(data.status === "playing") {
                     document.getElementById("lobby-screen").style.display = "none";
-                    document.getElementById("game-screen").style.display = "block";
-                    // ここで音楽再生許可のためのダミー再生を入れる
-                    screamAudio.play(); 
+                    document.getElementById("game-screen").style.display = "flex";
+                    // 音楽再生の儀式（ユーザー操作が必要なためダミー再生）
+                    screamAudio.play().catch(e => console.log("Audio warning")); 
                     screamAudio.pause();
+                    screamAudio.currentTime = 0;
                 }
 
-                // 死亡
+                // 死亡シグナル受信
                 if(data.status === "dead") {
-                    document.body.classList.add("flash"); // 背景点滅
-                    screamAudio.play(); // 絶叫
+                    document.body.classList.add("flash");
+                    screamAudio.play();
                     document.getElementById("game-screen").style.display = "none";
-                    document.getElementById("result-screen").style.display = "block";
+                    document.getElementById("result-screen").style.display = "flex";
                     document.getElementById("traitor-name").innerText = "戦犯：" + data.traitor;
                 }
             });
         }
 
-        // ゲーム開始トリガー
         window.startGame = async () => {
             await updateDoc(doc(db, "rooms", roomCode), { status: "playing" });
         };
 
-        // タッチイベント（Web用）
-        const tofu = document.getElementById("tofu");
+        // --- タッチ＆クリック処理 ---
+        const tofuImg = document.getElementById("tofu-img");
         
-        // 触れた時
-        tofu.addEventListener("touchstart", (e) => {
-            e.preventDefault();
-            tofu.style.transform = "scale(0.9)";
+        // PC用
+        tofuImg.addEventListener("mousedown", () => {
+            tofuImg.style.transform = "scale(0.9)";
+            isTouching = true;
+        });
+        document.addEventListener("mouseup", async () => {
+            if(isTouching) {
+                isTouching = false;
+                await triggerDeath();
+            }
+        });
+
+        // スマホ用
+        tofuImg.addEventListener("touchstart", (e) => {
+            e.preventDefault(); // スクロール防止
+            tofuImg.style.transform = "scale(0.9)";
             isTouching = true;
         }, {passive: false});
 
-        // 離した時（スマホ）
-        tofu.addEventListener("touchend", async (e) => {
+        tofuImg.addEventListener("touchend", async (e) => {
+            e.preventDefault();
             if(isTouching) {
-                await updateDoc(doc(db, "rooms", roomCode), { 
-                    status: "dead",
-                    traitor: myName
-                });
+                isTouching = false;
+                await triggerDeath();
             }
         });
 
-        // マウス（PCデバッグ用）
-        tofu.addEventListener("mousedown", () => {
-            tofu.style.transform = "scale(0.9)";
-            isTouching = true;
-        });
-        tofu.addEventListener("mouseup", async () => {
-            if(isTouching) {
-                await updateDoc(doc(db, "rooms", roomCode), { 
-                    status: "dead",
-                    traitor: myName
-                });
-            }
-        });
+        async function triggerDeath() {
+            // すでに誰かが死んでたら送らない
+            await updateDoc(doc(db, "rooms", roomCode), { 
+                status: "dead",
+                traitor: myName
+            });
+        }
     </script>
 </body>
 </html>
