@@ -2,7 +2,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebas
 import { getFirestore, doc, setDoc, updateDoc, onSnapshot, arrayUnion, arrayRemove, runTransaction } 
 from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
- // ★ここにFirebaseコンソールの設定をコピペせよ★
+// ★★★★★ ここにお前のConfigを貼れ！ ★★★★★
     const firebaseConfig = {
   apiKey: "AIzaSyDY8AWBkOS5H8ynYkODpogLl7SYoRF2JvY",
   authDomain: "tofu1-66cb7.firebaseapp.com",
@@ -24,8 +24,9 @@ const startAudio = new Audio('https://www.soundjay.com/buttons/sounds/button-3.m
 
 // 状態変数
 let roomCode = "";
-let myId = "ID" + Math.floor(Math.random() * 100000);
-let myName = "User " + myId.slice(-4);
+// ユニークIDと名前を組み合わせる "名前|ID" の形式にする
+let myUniqueId = Date.now().toString(36) + Math.random().toString(36).substr(2);
+let myFullName = ""; // ここに "Taro|id123" が入る
 let isTouching = false;
 let currentStatus = "lobby"; 
 
@@ -34,24 +35,44 @@ const ui = {
     lobby: document.getElementById("lobby-screen"),
     game: document.getElementById("game-screen"),
     result: document.getElementById("result-screen"),
-    input: document.getElementById("room-code-input"),
+    nameInput: document.getElementById("username-input"), // 名前入力
+    codeInput: document.getElementById("room-code-input"),
     msg: document.getElementById("status-message"),
     tofu: document.getElementById("tofu-img"),
     area: document.getElementById("game-area")
 };
 
-// --- イベントリスナー設定 ---
+// --- イベントリスナー ---
 document.getElementById("create-btn").onclick = createRoom;
 document.getElementById("join-btn").onclick = joinRoom;
 document.getElementById("to-ready-btn").onclick = goToReady;
 
-// --- 部屋作成・参加ロジック ---
+// --- クリップボードコピー機能 ---
+window.copyRoomCode = () => {
+    if (!roomCode) return;
+    navigator.clipboard.writeText(roomCode).then(() => {
+        const tooltip = document.getElementById("copy-tooltip");
+        tooltip.classList.add("show");
+        setTimeout(() => tooltip.classList.remove("show"), 2000);
+    }).catch(err => console.error(err));
+};
 
+// --- ヘルパー関数: 名前|ID から 名前だけ取り出す ---
+function getName(fullName) {
+    return fullName.split('|')[0] || "名無し";
+}
+
+// --- 部屋作成・参加ロジック ---
 async function createRoom() {
+    const name = ui.nameInput.value.trim();
+    if (!name) return alert("名前を入力してくれ！");
+    myFullName = `${name}|${myUniqueId}`; // 名前とIDを結合
+
     roomCode = Math.floor(100000 + Math.random() * 900000).toString();
+    
     await setDoc(doc(db, "rooms", roomCode), {
         status: "waiting",
-        members: [myId],
+        members: [myFullName],
         readyPlayers: [], 
         traitor: ""
     });
@@ -59,10 +80,15 @@ async function createRoom() {
 }
 
 async function joinRoom() {
-    roomCode = ui.input.value;
+    const name = ui.nameInput.value.trim();
+    if (!name) return alert("名前を入力してくれ！");
+    myFullName = `${name}|${myUniqueId}`;
+
+    roomCode = ui.codeInput.value;
     if(!roomCode || roomCode.length !== 6) return alert("6桁のコードを入れろ");
+    
     await updateDoc(doc(db, "rooms", roomCode), {
-        members: arrayUnion(myId)
+        members: arrayUnion(myFullName)
     });
     showWaitingUI();
 }
@@ -70,21 +96,30 @@ async function joinRoom() {
 function showWaitingUI() {
     document.getElementById("setup-ui").style.display = "none";
     document.getElementById("waiting-ui").classList.remove("hidden");
-    document.getElementById("room-display").innerText = "CODE: " + roomCode;
+    document.getElementById("room-display").innerText = roomCode;
     startListening();
 }
 
 // --- リアルタイム監視 ---
-
 function startListening() {
     onSnapshot(doc(db, "rooms", roomCode), (docSnap) => {
         const data = docSnap.data();
         if (!data) return;
 
-        // メンバー数更新
-        document.getElementById("member-count").innerText = data.members.length;
-        document.getElementById("total-count").innerText = data.members.length;
+        // メンバーリスト更新
+        const count = data.members.length;
+        document.getElementById("member-count").innerText = count;
+        document.getElementById("total-count").innerText = count;
         document.getElementById("ready-count").innerText = data.readyPlayers.length;
+
+        // 名前リストを表示
+        const listEl = document.getElementById("member-names-list");
+        listEl.innerHTML = "";
+        data.members.forEach(m => {
+            const li = document.createElement("li");
+            li.textContent = "👤 " + getName(m);
+            listEl.appendChild(li);
+        });
 
         // 画面遷移：準備フェーズ
         if (data.status === "ready_check" && currentStatus !== "ready_check") {
@@ -93,7 +128,6 @@ function startListening() {
             ui.game.classList.remove("hidden");
             ui.msg.innerText = "全員、豆腐に指を置け";
             ui.msg.style.color = "black";
-            // 状態リセット
             isTouching = false; 
             ui.area.classList.remove("touching");
         }
@@ -107,7 +141,7 @@ function startListening() {
             if (navigator.vibrate) navigator.vibrate(200);
         }
 
-        // 画面遷移：死亡（結果発表）
+        // 画面遷移：死亡（戦犯の名前を表示）
         if (data.status === "dead" && currentStatus !== "dead") {
             currentStatus = "dead";
             document.body.classList.add("flash");
@@ -115,22 +149,24 @@ function startListening() {
             
             ui.game.classList.add("hidden");
             ui.result.classList.remove("hidden");
-            document.getElementById("traitor-name").innerText = "戦犯：" + data.traitor;
+            
+            // 戦犯の名前を表示
+            document.getElementById("traitor-name").innerText = "戦犯：" + getName(data.traitor);
+            
             if (navigator.vibrate) navigator.vibrate([100,50,100,50,500]);
         }
         
-        // ホストによる自動スタート処理
+        // ホストによる自動スタート処理 (リストの先頭の人がホスト)
         if (currentStatus === "ready_check" && 
             data.readyPlayers.length === data.members.length && 
-            data.members.length > 0 && // 念のため
-            data.members[0] === myId) {
+            data.members.length > 0 &&
+            data.members[0] === myFullName) {
                 
             startGameTrigger();
         }
     });
 }
 
-// ホストアクション
 async function goToReady() {
     await updateDoc(doc(db, "rooms", roomCode), { 
         status: "ready_check",
@@ -142,32 +178,27 @@ async function startGameTrigger() {
     await updateDoc(doc(db, "rooms", roomCode), { status: "playing" });
 }
 
-// --- 【重要】死亡判定の厳格化（トランザクション） ---
+// --- トランザクション付き死亡判定 ---
 async function triggerDeath() {
     const roomRef = doc(db, "rooms", roomCode);
     try {
         await runTransaction(db, async (transaction) => {
             const sfDoc = await transaction.get(roomRef);
-            if (!sfDoc.exists()) throw "Document does not exist!";
+            if (!sfDoc.exists()) throw "Error!";
 
-            // 「まだゲーム中（誰も死んでない）」であることを確認してから書き込む
             if (sfDoc.data().status === "playing") {
                 transaction.update(roomRef, { 
                     status: "dead", 
-                    traitor: myId 
+                    traitor: myFullName // ここで自分の名前(識別子)を送る
                 });
-            } else {
-                // すでに誰かが死んでいるので、自分は戦犯にならない（タッチの差でセーフ）
-                console.log("ギリギリセーフ！誰かが先に死んだ。");
             }
         });
     } catch (e) {
-        console.log("Transaction failed: ", e);
+        console.log("Transaction logic: safe");
     }
 }
 
 // --- タッチ操作ロジック ---
-
 const startEvents = ["touchstart", "mousedown"];
 const endEvents = ["touchend", "mouseup", "mouseleave"];
 
@@ -181,7 +212,7 @@ startEvents.forEach(evt => {
 
         if (currentStatus === "ready_check") {
             await updateDoc(doc(db, "rooms", roomCode), {
-                readyPlayers: arrayUnion(myId)
+                readyPlayers: arrayUnion(myFullName)
             });
         }
     }, { passive: false });
@@ -194,16 +225,14 @@ endEvents.forEach(evt => {
         isTouching = false;
         ui.area.classList.remove("touching");
 
-        // 準備中ならキャンセル
         if (currentStatus === "ready_check") {
             await updateDoc(doc(db, "rooms", roomCode), {
-                readyPlayers: arrayRemove(myId)
+                readyPlayers: arrayRemove(myFullName)
             });
         }
 
-        // ゲーム中なら死亡判定へ
         if (currentStatus === "playing") {
-            await triggerDeath(); // ← ここを新しい関数に変えた
+            await triggerDeath();
         }
     });
 });
