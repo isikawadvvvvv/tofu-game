@@ -1,5 +1,5 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-import { getFirestore, doc, setDoc, updateDoc, onSnapshot, arrayUnion, arrayRemove, deleteField } 
+import { getFirestore, doc, setDoc, updateDoc, onSnapshot, arrayUnion, arrayRemove, runTransaction } 
 from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
  // ★ここにFirebaseコンソールの設定をコピペせよ★
@@ -13,20 +13,21 @@ from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
   measurementId: "G-68E9Q4Y7FR"
 };
 
+
 // --- 初期化 ---
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
 // 効果音
 const screamAudio = new Audio('https://www.soundjay.com/human/sounds/scream-01.mp3'); 
-const startAudio = new Audio('https://www.soundjay.com/buttons/sounds/button-3.mp3'); // ピッ！
+const startAudio = new Audio('https://www.soundjay.com/buttons/sounds/button-3.mp3'); 
 
 // 状態変数
 let roomCode = "";
-let myId = "ID" + Math.floor(Math.random() * 100000); // 重複しないID
+let myId = "ID" + Math.floor(Math.random() * 100000);
 let myName = "User " + myId.slice(-4);
 let isTouching = false;
-let currentStatus = "lobby"; // lobby, ready_check, playing, dead
+let currentStatus = "lobby"; 
 
 // DOM要素
 const ui = {
@@ -51,7 +52,7 @@ async function createRoom() {
     await setDoc(doc(db, "rooms", roomCode), {
         status: "waiting",
         members: [myId],
-        readyPlayers: [], // 準備完了した人のリスト
+        readyPlayers: [], 
         traitor: ""
     });
     showWaitingUI();
@@ -60,8 +61,6 @@ async function createRoom() {
 async function joinRoom() {
     roomCode = ui.input.value;
     if(!roomCode || roomCode.length !== 6) return alert("6桁のコードを入れろ");
-    
-    // 参加登録
     await updateDoc(doc(db, "rooms", roomCode), {
         members: arrayUnion(myId)
     });
@@ -72,8 +71,6 @@ function showWaitingUI() {
     document.getElementById("setup-ui").style.display = "none";
     document.getElementById("waiting-ui").classList.remove("hidden");
     document.getElementById("room-display").innerText = "CODE: " + roomCode;
-    
-    // 監視開始
     startListening();
 }
 
@@ -89,28 +86,29 @@ function startListening() {
         document.getElementById("total-count").innerText = data.members.length;
         document.getElementById("ready-count").innerText = data.readyPlayers.length;
 
-        // ステータス変更検知
+        // 画面遷移：準備フェーズ
         if (data.status === "ready_check" && currentStatus !== "ready_check") {
-            // ゲーム画面へ移動（準備フェーズ）
             currentStatus = "ready_check";
             ui.lobby.classList.add("hidden");
             ui.game.classList.remove("hidden");
             ui.msg.innerText = "全員、豆腐に指を置け";
             ui.msg.style.color = "black";
+            // 状態リセット
+            isTouching = false; 
+            ui.area.classList.remove("touching");
         }
 
+        // 画面遷移：ゲーム開始
         if (data.status === "playing" && currentStatus !== "playing") {
-            // ゲーム開始！
             currentStatus = "playing";
             ui.msg.innerText = "🔥🔥 離したら死ぬ 🔥🔥";
             ui.msg.style.color = "red";
             startAudio.play();
-            // 振動
             if (navigator.vibrate) navigator.vibrate(200);
         }
 
+        // 画面遷移：死亡（結果発表）
         if (data.status === "dead" && currentStatus !== "dead") {
-            // 死亡
             currentStatus = "dead";
             document.body.classList.add("flash");
             screamAudio.play();
@@ -121,10 +119,10 @@ function startListening() {
             if (navigator.vibrate) navigator.vibrate([100,50,100,50,500]);
         }
         
-        // 【ホスト役の自動処理】全員準備完了したらスタートさせる
-        // ※競合を防ぐため、メンバーリストの先頭の人だけが実行権を持つことにする
+        // ホストによる自動スタート処理
         if (currentStatus === "ready_check" && 
             data.readyPlayers.length === data.members.length && 
+            data.members.length > 0 && // 念のため
             data.members[0] === myId) {
                 
             startGameTrigger();
@@ -132,34 +130,55 @@ function startListening() {
     });
 }
 
-// ホストが「準備へ」ボタンを押した時
+// ホストアクション
 async function goToReady() {
     await updateDoc(doc(db, "rooms", roomCode), { 
         status: "ready_check",
-        readyPlayers: [] // リセット
+        readyPlayers: [] 
     });
 }
 
-// ゲーム開始トリガー（自動）
 async function startGameTrigger() {
     await updateDoc(doc(db, "rooms", roomCode), { status: "playing" });
 }
 
+// --- 【重要】死亡判定の厳格化（トランザクション） ---
+async function triggerDeath() {
+    const roomRef = doc(db, "rooms", roomCode);
+    try {
+        await runTransaction(db, async (transaction) => {
+            const sfDoc = await transaction.get(roomRef);
+            if (!sfDoc.exists()) throw "Document does not exist!";
+
+            // 「まだゲーム中（誰も死んでない）」であることを確認してから書き込む
+            if (sfDoc.data().status === "playing") {
+                transaction.update(roomRef, { 
+                    status: "dead", 
+                    traitor: myId 
+                });
+            } else {
+                // すでに誰かが死んでいるので、自分は戦犯にならない（タッチの差でセーフ）
+                console.log("ギリギリセーフ！誰かが先に死んだ。");
+            }
+        });
+    } catch (e) {
+        console.log("Transaction failed: ", e);
+    }
+}
+
 // --- タッチ操作ロジック ---
 
-// PC/スマホ両対応イベント
 const startEvents = ["touchstart", "mousedown"];
 const endEvents = ["touchend", "mouseup", "mouseleave"];
 
 startEvents.forEach(evt => {
     ui.tofu.addEventListener(evt, async (e) => {
-        e.preventDefault(); // 拡大などを防ぐ
-        if (isTouching) return; // 二重反応防止
+        e.preventDefault();
+        if (isTouching) return;
         
         isTouching = true;
         ui.area.classList.add("touching");
 
-        // 準備フェーズなら「準備OK」を送信
         if (currentStatus === "ready_check") {
             await updateDoc(doc(db, "rooms", roomCode), {
                 readyPlayers: arrayUnion(myId)
@@ -175,19 +194,16 @@ endEvents.forEach(evt => {
         isTouching = false;
         ui.area.classList.remove("touching");
 
-        // 準備フェーズなら「キャンセル」を送信
+        // 準備中ならキャンセル
         if (currentStatus === "ready_check") {
             await updateDoc(doc(db, "rooms", roomCode), {
                 readyPlayers: arrayRemove(myId)
             });
         }
 
-        // ゲーム中なら「死亡」確定
+        // ゲーム中なら死亡判定へ
         if (currentStatus === "playing") {
-            await updateDoc(doc(db, "rooms", roomCode), {
-                status: "dead",
-                traitor: myId
-            });
+            await triggerDeath(); // ← ここを新しい関数に変えた
         }
     });
 });
